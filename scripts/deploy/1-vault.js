@@ -7,6 +7,7 @@ async function main() {
   const depositFee = 0;
   const tvlCap = ethers.constants.MaxUint256;
 
+  
   const vault = await Vault.deploy(wantAddress, tokenName, tokenSymbol, depositFee, tvlCap);
 
   await vault.deployed();

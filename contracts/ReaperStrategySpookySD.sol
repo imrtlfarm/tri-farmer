@@ -10,7 +10,7 @@ import "./interfaces/IUniV2Pair.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 /**
- * @dev Deposit SpookySwap LP tokens into MasterChef. Harvest BOO and DEUS rewards and recompound.
+ * @dev Deposit SpookySwap LP tokens into MasterChef. Harvest BOO and SD rewards and recompound.
  */
 contract ReaperStrategySpookySD is ReaperBaseStrategyv1_1 {
     using SafeERC20Upgradeable for IERC20Upgradeable;
@@ -23,14 +23,16 @@ contract ReaperStrategySpookySD is ReaperBaseStrategyv1_1 {
      * @dev Tokens Used:
      * {WFTM} - Required for liquidity routing when doing swaps.
      * {BOO} - Reward token for depositing LP into MasterChef.
-     * {DEUS} - Secondary Reward token for depositing LP into MasterChef.
+     * {SD} - Secondary Reward token for depositing LP into MasterChef. Also one of the LP tokens.
+     * {USDC} - Other LP token.
      * {want} - Address of the LP token to farm. (lowercase name for FE compatibility)
      * {lpToken0} - First token of the want LP
      * {lpToken1} - Second token of the want LP
      */
     address public constant WFTM = address(0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83);
     address public constant BOO = address(0x841FAD6EAe12c286d1Fd18d1d525DFfA75C7EFFE);
-    address public constant DEUS = address(0xDE5ed76E7c05eC5e4572CfC88d1ACEA165109E44);
+    address public constant SD = address(0x412a13C109aC30f0dB80AD3Bd1DeFd5D0A6c0Ac6);
+    address public constant USDC = address(0x04068DA6C83AFCFA0e13ba15A6696662335D5B75);
     address public want;
     address public lpToken0;
     address public lpToken1;
@@ -38,12 +40,16 @@ contract ReaperStrategySpookySD is ReaperBaseStrategyv1_1 {
     /**
      * @dev Paths used to swap tokens:
      * {booToWftmPath} - to swap {BOO} to {WFTM} (using SPOOKY_ROUTER)
-     * {deusToWftmPath} - to swap {DEUS} to {WFTM} (using SPOOKY_ROUTER)
-     * {wftmToDeusPath} - to swap {WFTM} to {DEUS} (using SPOOKY_ROUTER)
+     * {booToUsdcPath} - to swap {BOO} to {USDC} (using SPOOKY_ROUTER)
+     * {sdToWftmPath} - to swap {SD} to {WFTM} (using SPOOKY_ROUTER)
+     * {sdToUsdcPath} - to swap {SD} to {USDC} (using SPOOKY_ROUTER)
+     * {usdcToSdPath} - to swap {USDC} to {SD} (using SPOOKY_ROUTER)
      */
     address[] public booToWftmPath;
-    address[] public deusToWftmPath;
-    address[] public wftmToDeusPath;
+    address[] public booToUsdcPath;
+    address[] public sdToWftmPath;
+    address[] public sdToUsdcPath;
+    address[] public usdcToSdPath;
 
     /**
      * @dev Spooky variables.
@@ -66,8 +72,10 @@ contract ReaperStrategySpookySD is ReaperBaseStrategyv1_1 {
         want = _want;
         poolId = _poolId;
         booToWftmPath = [BOO, WFTM];
-        deusToWftmPath = [DEUS, WFTM];
-        wftmToDeusPath = [WFTM, DEUS];
+        booToUsdcPath = [BOO, WFTM, USDC];
+        sdToWftmPath = [SD, USDC, WFTM];
+        sdToUsdcPath = [SD, USDC];
+        usdcToSdPath = [USDC, SD];
         lpToken0 = IUniV2Pair(want).token0();
         lpToken1 = IUniV2Pair(want).token1();
     }
@@ -98,8 +106,8 @@ contract ReaperStrategySpookySD is ReaperBaseStrategyv1_1 {
 
     /**
      * @dev Core function of the strat, in charge of collecting and re-investing rewards.
-     *      1. Claims {BOO} and {DEUS} from the {MASTER_CHEF}.
-     *      2. Uses totalFee% of {DEUS} and all of {BOO} to swap to {WFTM} and charge fees.
+     *      1. Claims {BOO} and {SD} from the {MASTER_CHEF}.
+     *      2. Uses totalFee% of {SD} and {BOO} to swap to {WFTM} and charge fees.
      *      3. Creates new LP tokens.
      *      4. Deposits LP in the Master Chef.
      */
@@ -115,16 +123,11 @@ contract ReaperStrategySpookySD is ReaperBaseStrategyv1_1 {
      *      Charges fees based on the amount of WFTM gained from reward
      */
     function _performSwapsAndChargeFees() internal {
+        _swap((IERC20Upgradeable(BOO).balanceOf(address(this)) * totalFee) / PERCENT_DIVISOR, booToWftmPath);
+        _swap((IERC20Upgradeable(SD).balanceOf(address(this)) * totalFee) / PERCENT_DIVISOR, sdToWftmPath);
+
         IERC20Upgradeable wftm = IERC20Upgradeable(WFTM);
-        uint256 startingWftmBal = wftm.balanceOf(address(this));
-        uint256 wftmFee = 0;
-
-        _swap((IERC20Upgradeable(DEUS).balanceOf(address(this)) * totalFee) / PERCENT_DIVISOR, deusToWftmPath);
-        wftmFee += wftm.balanceOf(address(this)) - startingWftmBal;
-        startingWftmBal = wftm.balanceOf(address(this));
-
-        _swap(IERC20Upgradeable(BOO).balanceOf(address(this)), booToWftmPath);
-        wftmFee += ((wftm.balanceOf(address(this)) - startingWftmBal) * totalFee) / PERCENT_DIVISOR;
+        uint256 wftmFee = wftm.balanceOf(address(this));
 
         if (wftmFee != 0) {
             uint256 callFeeToUser = (wftmFee * callFee) / PERCENT_DIVISOR;
@@ -160,30 +163,32 @@ contract ReaperStrategySpookySD is ReaperBaseStrategyv1_1 {
      * @dev Core harvest function. Adds more liquidity using {lpToken0} and {lpToken1}.
      */
     function _addLiquidity() internal {
-        uint256 wftmBal = IERC20Upgradeable(WFTM).balanceOf(address(this));
-        uint256 deusBal = IERC20Upgradeable(DEUS).balanceOf(address(this));
+        _swap(IERC20Upgradeable(BOO).balanceOf(address(this)), booToUsdcPath);
 
-        if (wftmBal == 0 && deusBal == 0) {
+        uint256 usdcBal = IERC20Upgradeable(USDC).balanceOf(address(this));
+        uint256 sdBal = IERC20Upgradeable(SD).balanceOf(address(this));
+
+        if (usdcBal == 0 && sdBal == 0) {
             return;
         }
 
         IUniswapV2Router02 router = IUniswapV2Router02(SPOOKY_ROUTER);
-        uint256 deusWftmEquivalent = router.getAmountsOut(deusBal, deusToWftmPath)[1];
+        uint256 sdUsdcEquivalent = router.getAmountsOut(sdBal, sdToUsdcPath)[1];
 
-        // If there's more DEUS, swap some for WFTM. If there's less, swap some WFTM for DEUS.
-        if (deusWftmEquivalent > wftmBal) {
-            uint256 deusAmountToSwap = (deusBal * ((deusWftmEquivalent - wftmBal) / 2)) / deusWftmEquivalent;
-            _swap(deusAmountToSwap, deusToWftmPath);
-        } else if (wftmBal > deusWftmEquivalent) {
-            _swap((wftmBal - deusWftmEquivalent) / 2, wftmToDeusPath);
+        // If there's more SD, swap some for USDC. If there's less, swap some USDC for SD.
+        if (sdUsdcEquivalent > usdcBal) {
+            uint256 sdAmountToSwap = (sdBal * ((sdUsdcEquivalent - usdcBal) / 2)) / sdUsdcEquivalent;
+            _swap(sdAmountToSwap, sdToUsdcPath);
+        } else if (usdcBal > sdUsdcEquivalent) {
+            _swap((usdcBal - sdUsdcEquivalent) / 2, usdcToSdPath);
         }
 
-        wftmBal = IERC20Upgradeable(WFTM).balanceOf(address(this));
-        deusBal = IERC20Upgradeable(DEUS).balanceOf(address(this));
+        usdcBal = IERC20Upgradeable(USDC).balanceOf(address(this));
+        sdBal = IERC20Upgradeable(SD).balanceOf(address(this));
 
-        IERC20Upgradeable(WFTM).safeIncreaseAllowance(SPOOKY_ROUTER, wftmBal);
-        IERC20Upgradeable(DEUS).safeIncreaseAllowance(SPOOKY_ROUTER, deusBal);
-        router.addLiquidity(WFTM, DEUS, wftmBal, deusBal, 0, 0, address(this), block.timestamp);
+        IERC20Upgradeable(USDC).safeIncreaseAllowance(SPOOKY_ROUTER, usdcBal);
+        IERC20Upgradeable(SD).safeIncreaseAllowance(SPOOKY_ROUTER, sdBal);
+        router.addLiquidity(USDC, SD, usdcBal, sdBal, 0, 0, address(this), block.timestamp);
     }
 
     /**
@@ -210,11 +215,11 @@ contract ReaperStrategySpookySD is ReaperBaseStrategyv1_1 {
             profit += IUniswapV2Router02(SPOOKY_ROUTER).getAmountsOut(totalRewards, booToWftmPath)[1];
         }
 
-        // {DEUS} reward
+        // {SD} reward
         pendingReward = rewarder.pendingToken(poolId, address(this));
-        totalRewards = pendingReward + IERC20Upgradeable(DEUS).balanceOf(address(this));
+        totalRewards = pendingReward + IERC20Upgradeable(SD).balanceOf(address(this));
         if (totalRewards != 0) {
-            profit += IUniswapV2Router02(SPOOKY_ROUTER).getAmountsOut(totalRewards, deusToWftmPath)[1];
+            profit += IUniswapV2Router02(SPOOKY_ROUTER).getAmountsOut(totalRewards, sdToWftmPath)[1];
         }
 
         profit += IERC20Upgradeable(WFTM).balanceOf(address(this));
@@ -233,7 +238,6 @@ contract ReaperStrategySpookySD is ReaperBaseStrategyv1_1 {
      */
     function _retireStrat() internal override {
         IMasterChefV2(MASTER_CHEF).deposit(poolId, 0); // deposit 0 to claim rewards
-        _swap(IERC20Upgradeable(BOO).balanceOf(address(this)), booToWftmPath);
         _addLiquidity();
 
         (uint256 poolBal, ) = IMasterChefV2(MASTER_CHEF).userInfo(poolId, address(this));

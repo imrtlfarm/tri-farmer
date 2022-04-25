@@ -10,9 +10,9 @@ import "./interfaces/IUniV2Pair.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 
 /**
- * @dev Deposit SpookySwap LP tokens into MasterChef. Harvest BOO and DEUS rewards and recompound.
+ * @dev Deposit SpookySwap LP tokens into MasterChef. Harvest BOO and SD rewards and recompound.
  */
-contract ReaperStrategySpookyDeus is ReaperBaseStrategyv1_1 {
+contract ReaperStrategySpookysFTMX is ReaperBaseStrategyv1_1 {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     // 3rd-party contract addresses
@@ -23,14 +23,16 @@ contract ReaperStrategySpookyDeus is ReaperBaseStrategyv1_1 {
      * @dev Tokens Used:
      * {WFTM} - Required for liquidity routing when doing swaps.
      * {BOO} - Reward token for depositing LP into MasterChef.
-     * {DEUS} - Secondary Reward token for depositing LP into MasterChef.
+     * {SD} - Secondary Reward token for depositing LP into MasterChef.
      * {want} - Address of the LP token to farm. (lowercase name for FE compatibility)
      * {lpToken0} - First token of the want LP
      * {lpToken1} - Second token of the want LP
      */
     address public constant WFTM = address(0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83);
     address public constant BOO = address(0x841FAD6EAe12c286d1Fd18d1d525DFfA75C7EFFE);
-    address public constant DEUS = address(0xDE5ed76E7c05eC5e4572CfC88d1ACEA165109E44);
+    address public constant SD = address(0x412a13C109aC30f0dB80AD3Bd1DeFd5D0A6c0Ac6);
+    address public constant USDC = address(0x04068DA6C83AFCFA0e13ba15A6696662335D5B75);
+    address public constant SFTMX = address(0xd7028092c830b5C8FcE061Af2E593413EbbC1fc1);
     address public want;
     address public lpToken0;
     address public lpToken1;
@@ -38,12 +40,12 @@ contract ReaperStrategySpookyDeus is ReaperBaseStrategyv1_1 {
     /**
      * @dev Paths used to swap tokens:
      * {booToWftmPath} - to swap {BOO} to {WFTM} (using SPOOKY_ROUTER)
-     * {deusToWftmPath} - to swap {DEUS} to {WFTM} (using SPOOKY_ROUTER)
-     * {wftmToDeusPath} - to swap {WFTM} to {DEUS} (using SPOOKY_ROUTER)
+     * {sdToWftmPath} - to swap {SD} to {WFTM} (using SPOOKY_ROUTER)
+     * {wftmToSftmx} - to swap {WFTM} to {sFTMX} (using SPOOKY_ROUTER)
      */
     address[] public booToWftmPath;
-    address[] public deusToWftmPath;
-    address[] public wftmToDeusPath;
+    address[] public sdToWftmPath;
+    address[] public wftmToSftmx;
 
     /**
      * @dev Spooky variables.
@@ -66,8 +68,8 @@ contract ReaperStrategySpookyDeus is ReaperBaseStrategyv1_1 {
         want = _want;
         poolId = _poolId;
         booToWftmPath = [BOO, WFTM];
-        deusToWftmPath = [DEUS, WFTM];
-        wftmToDeusPath = [WFTM, DEUS];
+        sdToWftmPath = [SD, USDC, WFTM];
+        wftmToSftmx = [WFTM, SFTMX];
         lpToken0 = IUniV2Pair(want).token0();
         lpToken1 = IUniV2Pair(want).token1();
     }
@@ -98,16 +100,22 @@ contract ReaperStrategySpookyDeus is ReaperBaseStrategyv1_1 {
 
     /**
      * @dev Core function of the strat, in charge of collecting and re-investing rewards.
-     *      1. Claims {BOO} and {DEUS} from the {MASTER_CHEF}.
-     *      2. Uses totalFee% of {DEUS} and all of {BOO} to swap to {WFTM} and charge fees.
+     *      1. Claims {BOO} and {SD} from the {MASTER_CHEF}.
+     *      2. Uses totalFee% of {SD} and all of {BOO} to swap to {WFTM} and charge fees.
      *      3. Creates new LP tokens.
      *      4. Deposits LP in the Master Chef.
      */
     function _harvestCore() internal override {
-        IMasterChefV2(MASTER_CHEF).deposit(poolId, 0); // deposit 0 to claim rewards
+        _claimRewards();
         _performSwapsAndChargeFees();
         _addLiquidity();
         deposit();
+    }
+
+    function _claimRewards() internal {
+        IMasterChefV2(MASTER_CHEF).deposit(poolId, 0); // deposit 0 to claim rewards
+        uint256 sdBalance = IERC20Upgradeable(SD).balanceOf(address(this));
+        uint256 booBalance = IERC20Upgradeable(BOO).balanceOf(address(this));
     }
 
     /**
@@ -119,8 +127,8 @@ contract ReaperStrategySpookyDeus is ReaperBaseStrategyv1_1 {
         uint256 startingWftmBal = wftm.balanceOf(address(this));
         uint256 wftmFee = 0;
 
-        _swap((IERC20Upgradeable(DEUS).balanceOf(address(this)) * totalFee) / PERCENT_DIVISOR, deusToWftmPath);
-        wftmFee += wftm.balanceOf(address(this)) - startingWftmBal;
+        _swap(IERC20Upgradeable(SD).balanceOf(address(this)), sdToWftmPath);
+        wftmFee += ((wftm.balanceOf(address(this)) - startingWftmBal) * totalFee) / PERCENT_DIVISOR;
         startingWftmBal = wftm.balanceOf(address(this));
 
         _swap(IERC20Upgradeable(BOO).balanceOf(address(this)), booToWftmPath);
@@ -160,30 +168,20 @@ contract ReaperStrategySpookyDeus is ReaperBaseStrategyv1_1 {
      * @dev Core harvest function. Adds more liquidity using {lpToken0} and {lpToken1}.
      */
     function _addLiquidity() internal {
-        uint256 wftmBal = IERC20Upgradeable(WFTM).balanceOf(address(this));
-        uint256 deusBal = IERC20Upgradeable(DEUS).balanceOf(address(this));
+        uint256 wftmBalHalf = IERC20Upgradeable(WFTM).balanceOf(address(this)) / 2;
 
-        if (wftmBal == 0 && deusBal == 0) {
+        if (wftmBalHalf == 0) {
             return;
         }
 
-        IUniswapV2Router02 router = IUniswapV2Router02(SPOOKY_ROUTER);
-        uint256 deusWftmEquivalent = router.getAmountsOut(deusBal, deusToWftmPath)[1];
+        _swap(wftmBalHalf, wftmToSftmx);
 
-        // If there's more DEUS, swap some for WFTM. If there's less, swap some WFTM for DEUS.
-        if (deusWftmEquivalent > wftmBal) {
-            uint256 deusAmountToSwap = (deusBal * ((deusWftmEquivalent - wftmBal) / 2)) / deusWftmEquivalent;
-            _swap(deusAmountToSwap, deusToWftmPath);
-        } else if (wftmBal > deusWftmEquivalent) {
-            _swap((wftmBal - deusWftmEquivalent) / 2, wftmToDeusPath);
-        }
-
-        wftmBal = IERC20Upgradeable(WFTM).balanceOf(address(this));
-        deusBal = IERC20Upgradeable(DEUS).balanceOf(address(this));
+        uint256 wftmBal = IERC20Upgradeable(WFTM).balanceOf(address(this));
+        uint256 sftmxBal = IERC20Upgradeable(SFTMX).balanceOf(address(this));
 
         IERC20Upgradeable(WFTM).safeIncreaseAllowance(SPOOKY_ROUTER, wftmBal);
-        IERC20Upgradeable(DEUS).safeIncreaseAllowance(SPOOKY_ROUTER, deusBal);
-        router.addLiquidity(WFTM, DEUS, wftmBal, deusBal, 0, 0, address(this), block.timestamp);
+        IERC20Upgradeable(SFTMX).safeIncreaseAllowance(SPOOKY_ROUTER, sftmxBal);
+        IUniswapV2Router02(SPOOKY_ROUTER).addLiquidity(WFTM, SFTMX, wftmBal, sftmxBal, 0, 0, address(this), block.timestamp);
     }
 
     /**
@@ -210,11 +208,11 @@ contract ReaperStrategySpookyDeus is ReaperBaseStrategyv1_1 {
             profit += IUniswapV2Router02(SPOOKY_ROUTER).getAmountsOut(totalRewards, booToWftmPath)[1];
         }
 
-        // {DEUS} reward
+        // {SD} reward
         pendingReward = rewarder.pendingToken(poolId, address(this));
-        totalRewards = pendingReward + IERC20Upgradeable(DEUS).balanceOf(address(this));
+        totalRewards = pendingReward + IERC20Upgradeable(SD).balanceOf(address(this));
         if (totalRewards != 0) {
-            profit += IUniswapV2Router02(SPOOKY_ROUTER).getAmountsOut(totalRewards, deusToWftmPath)[1];
+            profit += IUniswapV2Router02(SPOOKY_ROUTER).getAmountsOut(totalRewards, sdToWftmPath)[1];
         }
 
         profit += IERC20Upgradeable(WFTM).balanceOf(address(this));
@@ -232,8 +230,8 @@ contract ReaperStrategySpookyDeus is ReaperBaseStrategyv1_1 {
      * Note: this is not an emergency withdraw function. For that, see panic().
      */
     function _retireStrat() internal override {
-        IMasterChefV2(MASTER_CHEF).deposit(poolId, 0); // deposit 0 to claim rewards
-        _swap(IERC20Upgradeable(BOO).balanceOf(address(this)), booToWftmPath);
+        _claimRewards();
+        _performSwapsAndChargeFees();
         _addLiquidity();
 
         (uint256 poolBal, ) = IMasterChefV2(MASTER_CHEF).userInfo(poolId, address(this));

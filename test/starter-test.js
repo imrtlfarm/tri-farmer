@@ -37,19 +37,19 @@ describe('Vaults', function () {
   
   const treasuryAddr = '0x0e7c5313E9BB80b654734d9b7aB1FB01468deE3b';
   const paymentSplitterAddress = '0x63cbd4134c2253041F370472c130e92daE4Ff174';
-  const wantAddress = '0xaF918eF5b9f33231764A5557881E6D3e5277d456';
-  const mcPoolId = 2;
+  const wantAddress = '0xeaa3C87135eE1140E1D60FC8B577fbb41163D840';
+  const mcPoolId = 3;
 
-  const wantHolderAddr = '0x9356527a1b84849b4b393b6a0e9f8b81a9b35a14';
+  const wantHolderAddr = '0x9dADb5473a1672Fbc8F2441D1D1522Ac06F67880';
   const strategistAddr = '0x1A20D7A31e5B3Bc5f02c8A146EF6f394502a10c4';
 
-  const booAddress = '0x841FAD6EAe12c286d1Fd18d1d525DFfA75C7EFFE';
-  const booHolderAddr = '0xf778F4D7a14A8CB73d5261f9C61970ef4E7D7842';
+  // const booAddress = '0x841FAD6EAe12c286d1Fd18d1d525DFfA75C7EFFE';
+  // const booHolderAddr = '0xf778F4D7a14A8CB73d5261f9C61970ef4E7D7842';
   
   let owner;
   let wantHolder;
   let strategist;
-  let booHolder;
+  // let booHolder;
 
   beforeEach(async function () {
     //reset network
@@ -59,7 +59,7 @@ describe('Vaults', function () {
         {
           forking: {
             jsonRpcUrl: 'https://rpc.ftm.tools/',
-            blockNumber: 35996271,
+            blockNumber: 36942964,
           },
         },
       ],
@@ -77,22 +77,22 @@ describe('Vaults', function () {
       params: [strategistAddr],
     });
     strategist = await ethers.provider.getSigner(strategistAddr);
-    await hre.network.provider.request({
-      method: 'hardhat_impersonateAccount',
-      params: [booHolderAddr],
-    });
-    booHolder = await ethers.provider.getSigner(booHolderAddr);
+    // await hre.network.provider.request({
+    //   method: 'hardhat_impersonateAccount',
+    //   params: [booHolderAddr],
+    // });
+    // booHolder = await ethers.provider.getSigner(booHolderAddr);
 
     //get artifacts
     Vault = await ethers.getContractFactory('ReaperVaultv1_4');
-    Strategy = await ethers.getContractFactory('ReaperStrategySpookyDeus');
+    Strategy = await ethers.getContractFactory('ReaperStrategySpookySD');
     Want = await ethers.getContractFactory('@openzeppelin/contracts/token/ERC20/ERC20.sol:ERC20');
 
     //deploy contracts
     vault = await Vault.deploy(
       wantAddress,
-      'FTM-DEUS Spooky Crypt',
-      'rf-sp-FTM-DEUS',
+      'SD-USDC Spooky Crypt',
+      'rf-sp-SD-USDC',
       0,
       ethers.constants.MaxUint256,
     );
@@ -109,7 +109,7 @@ describe('Vaults', function () {
     await want.connect(wantHolder).approve(vault.address, ethers.constants.MaxUint256);
   });
 
-  describe('Deploying the vault and strategy', function () {
+  xdescribe('Deploying the vault and strategy', function () {
     it('should initiate vault with a 0 balance', async function () {
       const totalBalance = await vault.balance();
       const availableBalance = await vault.available();
@@ -167,10 +167,10 @@ describe('Vaults', function () {
   });
 
   describe('Vault Tests', function () {
-    it('should allow deposits and account for them correctly', async function () {
+    xit('should allow deposits and account for them correctly', async function () {
       const userBalance = await want.balanceOf(wantHolderAddr);
       const vaultBalance = await vault.balance();
-      const depositAmount = toWantUnit('10');
+      const depositAmount = toWantUnit('0.02');
       await vault.connect(wantHolder).deposit(depositAmount);
       
       const newVaultBalance = await vault.balance();
@@ -179,12 +179,12 @@ describe('Vaults', function () {
       expect(depositAmount).to.be.closeTo(newVaultBalance, allowedInaccuracy);
     });
 
-    it('should mint user their pool share', async function () {
+    xit('should mint user their pool share', async function () {
       const userBalance = await want.balanceOf(wantHolderAddr);
-      const depositAmount = toWantUnit('10');
+      const depositAmount = toWantUnit('0.015');
       await vault.connect(wantHolder).deposit(depositAmount);
 
-      const ownerDepositAmount = toWantUnit('0.1');
+      const ownerDepositAmount = toWantUnit('0.005');
       await want.connect(wantHolder).transfer(owner.address, ownerDepositAmount);
       await want.connect(owner).approve(vault.address, ethers.constants.MaxUint256);
       await vault.connect(owner).deposit(ownerDepositAmount);
@@ -203,9 +203,9 @@ describe('Vaults', function () {
       expect(afterOwnerVaultBalance).to.equal(0);
     });
 
-    it('should allow withdrawals', async function () {
+    xit('should allow withdrawals', async function () {
       const userBalance = await want.balanceOf(wantHolderAddr);
-      const depositAmount = toWantUnit('10');
+      const depositAmount = toWantUnit('0.02');
       await vault.connect(wantHolder).deposit(depositAmount);
 
       await vault.connect(wantHolder).withdrawAll();
@@ -221,12 +221,12 @@ describe('Vaults', function () {
       expect(isSmallBalanceDifference).to.equal(true);
     });
 
-    it('should allow small withdrawal', async function () {
+    xit('should allow small withdrawal', async function () {
       const userBalance = await want.balanceOf(wantHolderAddr);
       const depositAmount = toWantUnit('0.0000001');
       await vault.connect(wantHolder).deposit(depositAmount);
 
-      const ownerDepositAmount = toWantUnit('0.1');
+      const ownerDepositAmount = toWantUnit('0.001');
       await want.connect(wantHolder).transfer(owner.address, ownerDepositAmount);
       await want.connect(owner).approve(vault.address, ethers.constants.MaxUint256);
       await vault.connect(owner).deposit(ownerDepositAmount);
@@ -244,7 +244,7 @@ describe('Vaults', function () {
       expect(isSmallBalanceDifference).to.equal(true);
     });
 
-    it('should handle small deposit + withdraw', async function () {
+    xit('should handle small deposit + withdraw', async function () {
       const userBalance = await want.balanceOf(wantHolderAddr);
       const depositAmount = toWantUnit('0.0000000000001');
       await vault.connect(wantHolder).deposit(depositAmount);
@@ -263,20 +263,20 @@ describe('Vaults', function () {
     });
 
     it('should be able to harvest', async function () {
-      await vault.connect(wantHolder).deposit(toWantUnit('15'));
+      await vault.connect(wantHolder).deposit(toWantUnit('0.02'));
       await moveBlocksForward(100);
       await strategy.harvest();
     });
 
     it('should provide yield', async function () {
       const timeToSkip = 3600;
-      await vault.connect(wantHolder).deposit(toWantUnit('15'));
+      await vault.connect(wantHolder).deposit(toWantUnit('0.02'));
       const initialVaultBalance = await vault.balance();
 
       await strategy.updateHarvestLogCadence(1);
 
       const numHarvests = 5;
-      boo = Want.attach(booAddress);
+      // boo = Want.attach(booAddress);
       for (let i = 0; i < numHarvests; i++) {
         // await beets.connect(beetsHolder).transfer(strategy.address, toWantUnit('1'));
         await moveBlocksForward(100);
@@ -291,16 +291,16 @@ describe('Vaults', function () {
     });
   });
   describe('Strategy', function () {
-    it('should be able to pause and unpause', async function () {
+    xit('should be able to pause and unpause', async function () {
       await strategy.pause();
-      const depositAmount = toWantUnit('1');
+      const depositAmount = toWantUnit('0.02');
       await expect(vault.connect(wantHolder).deposit(depositAmount)).to.be.reverted;
 
       await strategy.unpause();
       await expect(vault.connect(wantHolder).deposit(depositAmount)).to.not.be.reverted;
     });
 
-    it('should be able to panic', async function () {
+    xit('should be able to panic', async function () {
       const depositAmount = toWantUnit('0.0007');
       await vault.connect(wantHolder).deposit(depositAmount);
       const vaultBalance = await vault.balance();
@@ -313,7 +313,7 @@ describe('Vaults', function () {
     });
 
     it('should be able to retire strategy', async function () {
-      const depositAmount = toWantUnit('10');
+      const depositAmount = toWantUnit('0.02');
       await vault.connect(wantHolder).deposit(depositAmount);
       await moveBlocksForward(100);
       const vaultBalance = await vault.balance();
@@ -330,12 +330,12 @@ describe('Vaults', function () {
       expect(newStrategyBalance).to.be.lt(allowedImprecision);
     });
 
-    it('should be able to retire strategy with no balance', async function () {
+    xit('should be able to retire strategy with no balance', async function () {
       await expect(strategy.retireStrat()).to.not.be.reverted;
     });
 
     it('should be able to estimate harvest', async function () {
-      const whaleDepositAmount = toWantUnit('10');
+      const whaleDepositAmount = toWantUnit('0.02');
       await vault.connect(wantHolder).deposit(whaleDepositAmount);
       await moveBlocksForward(100);
       await strategy.harvest();

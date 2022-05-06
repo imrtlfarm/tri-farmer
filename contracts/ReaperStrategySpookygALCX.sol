@@ -11,7 +11,7 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeab
 /**
  * @dev Deposit SpookySwap LP tokens into MasterChef. Harvest BOO rewards and recompound.
  */
-contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
+contract ReaperStrategySpookygALCX is ReaperBaseStrategyv1_1 {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     // 3rd-party contract addresses

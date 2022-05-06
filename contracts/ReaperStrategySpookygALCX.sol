@@ -3,11 +3,10 @@
 pragma solidity ^0.8.0;
 
 import "./abstract/ReaperBaseStrategyv1_1.sol";
-import "./interfaces/IMasterChef.sol";
+import "./interfaces/IMasterChefV2.sol";
 import "./interfaces/IUniswapV2Router02.sol";
 import "./interfaces/IUniV2Pair.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/math/MathUpgradeable.sol";
 
 /**
  * @dev Deposit SpookySwap LP tokens into MasterChef. Harvest BOO rewards and recompound.
@@ -17,18 +16,20 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
 
     // 3rd-party contract addresses
     address public constant SPOOKY_ROUTER = address(0xF491e7B69E4244ad4002BC14e878a34207E38c29);
-    address public constant MASTER_CHEF = address(0x2b2929E785374c651a81A63878Ab22742656DcDd);
+    address public constant MASTER_CHEF = address(0x18b4f774fdC7BF685daeeF66c2990b1dDd9ea6aD);
 
     /**
      * @dev Tokens Used:
-     * {WFTM} - Required for liquidity routing when doing swaps.
+     * {WFTM} - Required for liquidity routing when doing swaps and one of the LP tokens.
      * {BOO} - Reward token for depositing LP into MasterChef.
+     * {GALCX} - Other LP token.
      * {want} - Address of the LP token to farm. (lowercase name for FE compatibility)
      * {lpToken0} - First token of the want LP
      * {lpToken1} - Second token of the want LP
      */
     address public constant WFTM = address(0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83);
     address public constant BOO = address(0x841FAD6EAe12c286d1Fd18d1d525DFfA75C7EFFE);
+    address public constant GALCX = address(0x70F9fd19f857411b089977E7916c05A0fc477Ac9);
     address public want;
     address public lpToken0;
     address public lpToken1;
@@ -36,8 +37,10 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
     /**
      * @dev Paths used to swap tokens:
      * {booToWftmPath} - to swap {BOO} to {WFTM} (using SPOOKY_ROUTER)
+     * {wftmToGalcxPath} - to swap {WFTM} to {GALCX} (using SPOOKY_ROUTER)
      */
     address[] public booToWftmPath;
+    address[] public wftmToGalcxPath;
 
     /**
      * @dev Spooky variables.
@@ -60,6 +63,7 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
         want = _want;
         poolId = _poolId;
         booToWftmPath = [BOO, WFTM];
+        wftmToGalcxPath = [WFTM, GALCX];
         lpToken0 = IUniV2Pair(want).token0();
         lpToken1 = IUniV2Pair(want).token1();
     }
@@ -72,7 +76,7 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
         uint256 wantBalance = IERC20Upgradeable(want).balanceOf(address(this));
         if (wantBalance != 0) {
             IERC20Upgradeable(want).safeIncreaseAllowance(MASTER_CHEF, wantBalance);
-            IMasterChef(MASTER_CHEF).deposit(poolId, wantBalance);
+            IMasterChefV2(MASTER_CHEF).deposit(poolId, wantBalance);
         }
     }
 
@@ -82,7 +86,7 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
     function _withdraw(uint256 _amount) internal override {
         uint256 wantBal = IERC20Upgradeable(want).balanceOf(address(this));
         if (wantBal < _amount) {
-            IMasterChef(MASTER_CHEF).withdraw(poolId, _amount - wantBal);
+            IMasterChefV2(MASTER_CHEF).withdraw(poolId, _amount - wantBal);
         }
 
         IERC20Upgradeable(want).safeTransfer(vault, _amount);
@@ -105,7 +109,7 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
     }
 
     function _claimRewards() internal {
-        IMasterChef(MASTER_CHEF).deposit(poolId, 0); // deposit 0 to claim rewards
+        IMasterChefV2(MASTER_CHEF).deposit(poolId, 0); // deposit 0 to claim rewards
     }
 
     function _swapToWFTM() internal {
@@ -154,23 +158,12 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
      * @dev Core harvest function. Adds more liquidity using {lpToken0} and {lpToken1}.
      */
     function _addLiquidity() internal {
+        uint256 wftmBal = IERC20Upgradeable(WFTM).balanceOf(address(this));
+
+        _swap(wftmBal / 2, wftmToGalcxPath);
+
         uint256 lp0Bal = IERC20Upgradeable(lpToken0).balanceOf(address(this));
         uint256 lp1Bal = IERC20Upgradeable(lpToken1).balanceOf(address(this));
-
-        if (lpToken0 == WFTM) {
-            address[] memory wftmToLP1 = new address[](2);
-            wftmToLP1[0] = WFTM;
-            wftmToLP1[1] = lpToken1;
-            _swap(lp0Bal / 2, wftmToLP1);
-        } else {
-            address[] memory wftmToLP0 = new address[](2);
-            wftmToLP0[0] = WFTM;
-            wftmToLP0[1] = lpToken0;
-            _swap(lp1Bal / 2, wftmToLP0);
-        }
-
-        lp0Bal = IERC20Upgradeable(lpToken0).balanceOf(address(this));
-        lp1Bal = IERC20Upgradeable(lpToken1).balanceOf(address(this));
 
         if (lp0Bal != 0 && lp1Bal != 0) {
             IERC20Upgradeable(lpToken0).safeIncreaseAllowance(SPOOKY_ROUTER, lp0Bal);
@@ -193,7 +186,7 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
      *      It takes into account both the funds in hand, plus the funds in the MasterChef.
      */
     function balanceOf() public view override returns (uint256) {
-        (uint256 amount, ) = IMasterChef(MASTER_CHEF).userInfo(poolId, address(this));
+        (uint256 amount, ) = IMasterChefV2(MASTER_CHEF).userInfo(poolId, address(this));
         return amount + IERC20Upgradeable(want).balanceOf(address(this));
     }
 
@@ -202,7 +195,7 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
      *      Profit is denominated in WFTM, and takes fees into account.
      */
     function estimateHarvest() external view override returns (uint256 profit, uint256 callFeeToUser) {
-        uint256 pendingReward = IMasterChef(MASTER_CHEF).pendingBOO(poolId, address(this));
+        uint256 pendingReward = IMasterChefV2(MASTER_CHEF).pendingBOO(poolId, address(this));
         uint256 totalRewards = pendingReward + IERC20Upgradeable(BOO).balanceOf(address(this));
 
         if (totalRewards != 0) {
@@ -224,14 +217,14 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
      * Note: this is not an emergency withdraw function. For that, see panic().
      */
     function _retireStrat() internal override {
-        IMasterChef(MASTER_CHEF).deposit(poolId, 0); // deposit 0 to claim rewards
+        IMasterChefV2(MASTER_CHEF).deposit(poolId, 0); // deposit 0 to claim rewards
 
         _swapToWFTM();
 
         _addLiquidity();
 
-        (uint256 poolBal, ) = IMasterChef(MASTER_CHEF).userInfo(poolId, address(this));
-        IMasterChef(MASTER_CHEF).withdraw(poolId, poolBal);
+        (uint256 poolBal, ) = IMasterChefV2(MASTER_CHEF).userInfo(poolId, address(this));
+        IMasterChefV2(MASTER_CHEF).withdraw(poolId, poolBal);
 
         uint256 wantBalance = IERC20Upgradeable(want).balanceOf(address(this));
         IERC20Upgradeable(want).safeTransfer(vault, wantBalance);
@@ -241,6 +234,6 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
      * Withdraws all funds leaving rewards behind.
      */
     function _reclaimWant() internal override {
-        IMasterChef(MASTER_CHEF).emergencyWithdraw(poolId);
+        IMasterChefV2(MASTER_CHEF).emergencyWithdraw(poolId, address(this));
     }
 }

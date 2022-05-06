@@ -36,10 +36,10 @@ describe('Vaults', function () {
 
   const treasuryAddr = '0x0e7c5313E9BB80b654734d9b7aB1FB01468deE3b';
   const paymentSplitterAddress = '0x63cbd4134c2253041F370472c130e92daE4Ff174';
-  const wantAddress = '0xC9FB686f14bDA7e2653cF8F605Dc8551B6a53FD3';
+  const wantAddress = '0xD5b545e788370aC454BfA765e7875A3a2253cC3b';
 
-  const wantHolderAddr = '0xe0c15e9fe90d56472d8a43da5d3ef34ae955583c';
-  const strategistAddr = '0x1A20D7A31e5B3Bc5f02c8A146EF6f394502a10c4';
+  const wantHolderAddr = '0x1E71AEE6081f62053123140aacC7a06021D77348';
+  const strategistAddr = '0x1E71AEE6081f62053123140aacC7a06021D77348';
 
   let owner;
   let wantHolder;
@@ -53,7 +53,7 @@ describe('Vaults', function () {
         {
           forking: {
             jsonRpcUrl: 'https://rpc.ftm.tools/',
-            blockNumber: 35529021,
+            // blockNumber: 35529021,
           },
         },
       ],
@@ -76,10 +76,10 @@ describe('Vaults', function () {
     Vault = await ethers.getContractFactory('ReaperVaultv1_4');
     Strategy = await ethers.getContractFactory('ReaperStrategySpooky');
     Want = await ethers.getContractFactory('@openzeppelin/contracts/token/ERC20/ERC20.sol:ERC20');
-    const poolId = 70;
+    const poolId = 6;
 
     //deploy contracts
-    vault = await Vault.deploy(wantAddress, 'TOMB-MAI Tomb Crypt', 'rf-TOMB-MAI', 0, ethers.constants.MaxUint256);
+    vault = await Vault.deploy(wantAddress, 'FTM-gALCX Crypt', 'rf-FTM-gALCX', 0, ethers.constants.MaxUint256);
     strategy = await hre.upgrades.deployProxy(
       Strategy,
       [vault.address, [treasuryAddr, paymentSplitterAddress], [strategistAddr], wantAddress, poolId],
@@ -94,7 +94,7 @@ describe('Vaults', function () {
   });
 
   describe('Deploying the vault and strategy', function () {
-    xit('should initiate vault with a 0 balance', async function () {
+    it('should initiate vault with a 0 balance', async function () {
       const totalBalance = await vault.balance();
       const availableBalance = await vault.available();
       const pricePerFullShare = await vault.getPricePerFullShare();
@@ -105,10 +105,10 @@ describe('Vaults', function () {
   });
 
   describe('Vault Tests', function () {
-    xit('should allow deposits and account for them correctly', async function () {
+    it('should allow deposits and account for them correctly', async function () {
       const userBalance = await want.balanceOf(wantHolderAddr);
       const vaultBalance = await vault.balance();
-      const depositAmount = toWantUnit('1');
+      const depositAmount = toWantUnit('0.01');
       await vault.connect(wantHolder).deposit(depositAmount);
 
       const newVaultBalance = await vault.balance();

@@ -10,37 +10,39 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeab
 import "@openzeppelin/contracts-upgradeable/utils/math/MathUpgradeable.sol";
 
 /**
- * @dev Deposit SpookySwap LP tokens into MasterChef. Harvest BOO rewards and recompound.
+ * @dev Deposit Trisolaris LP tokens into MasterChef. Harvest TRI rewards and recompound.
+ * @notice Contract data pulled from https://trisolaris-labs.github.io/docs/contracts/
  */
-contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
+contract ReaperStrategyTrisolaris is ReaperBaseStrategyv1_1 {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     // 3rd-party contract addresses
-    address public constant SPOOKY_ROUTER = address(0xF491e7B69E4244ad4002BC14e878a34207E38c29);
-    address public constant MASTER_CHEF = address(0x2b2929E785374c651a81A63878Ab22742656DcDd);
+    address public constant TRISOLARIS_ROUTER = address(0x2CB45Edb4517d5947aFdE3BEAbF95A582506858B);
+    // Uses V1 masterchef at poolId 2
+    address public constant MASTER_CHEF = address(0x1f1Ed214bef5E83D8f5d0eB5D7011EB965D0D79B);
 
     /**
      * @dev Tokens Used:
-     * {WFTM} - Required for liquidity routing when doing swaps.
-     * {BOO} - Reward token for depositing LP into MasterChef.
+     * {WETH} - Required for liquidity routing when doing swaps.
+     * {TRI} - Reward token for depositing LP into MasterChef.
      * {want} - Address of the LP token to farm. (lowercase name for FE compatibility)
      * {lpToken0} - First token of the want LP
      * {lpToken1} - Second token of the want LP
      */
-    address public constant WFTM = address(0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83);
-    address public constant BOO = address(0x841FAD6EAe12c286d1Fd18d1d525DFfA75C7EFFE);
+    address public constant WETH = address(0xC9BdeEd33CD01541e1eeD10f90519d2C06Fe3feB);
+    address public constant TRI = address(0xFa94348467f64D5A457F75F8bc40495D33c65aBB);
     address public want;
     address public lpToken0;
     address public lpToken1;
 
     /**
      * @dev Paths used to swap tokens:
-     * {booToWftmPath} - to swap {BOO} to {WFTM} (using SPOOKY_ROUTER)
+     * {triToWethPath} - to swap {TRI} to {WETH} (using TRISOLARIS_ROUTER)
      */
-    address[] public booToWftmPath;
+    address[] public triToWethPath;
 
     /**
-     * @dev Spooky variables.
+     * @dev Trisolaris variables.
      * {poolId} - ID of pool in which to deposit LP tokens
      */
     uint256 public poolId;
@@ -59,7 +61,7 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
         __ReaperBaseStrategy_init(_vault, _feeRemitters, _strategists);
         want = _want;
         poolId = _poolId;
-        booToWftmPath = [BOO, WFTM];
+        triToWethPath = [TRI, WETH];
         lpToken0 = IUniV2Pair(want).token0();
         lpToken1 = IUniV2Pair(want).token1();
     }
@@ -90,15 +92,15 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
 
     /**
      * @dev Core function of the strat, in charge of collecting and re-investing rewards.
-     *      1. Claims {BOO} from the {MASTER_CHEF}.
-     *      2. Swaps {BOO} to {WFTM}.
+     *      1. Claims {TRI} from the {MASTER_CHEF}.
+     *      2. Swaps {TRI} to {WETH}.
      *      3. Charge fees.
      *      4. Creates new LP tokens.
      *      5. Deposits LP in the Master Chef.
      */
     function _harvestCore() internal override {
         _claimRewards();
-        _swapToWFTM();
+        _swapToWETH();
         _chargeFees();
         _addLiquidity();
         deposit();
@@ -108,9 +110,9 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
         IMasterChef(MASTER_CHEF).deposit(poolId, 0); // deposit 0 to claim rewards
     }
 
-    function _swapToWFTM() internal {
-        IERC20Upgradeable boo = IERC20Upgradeable(BOO);
-        _swap((boo.balanceOf(address(this))), booToWftmPath);
+    function _swapToWETH() internal {
+        IERC20Upgradeable tri = IERC20Upgradeable(TRI);
+        _swap((tri.balanceOf(address(this))), triToWethPath);
     }
 
     /**
@@ -121,8 +123,8 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
             return;
         }
 
-        IERC20Upgradeable(_path[0]).safeIncreaseAllowance(SPOOKY_ROUTER, _amount);
-        IUniswapV2Router02(SPOOKY_ROUTER).swapExactTokensForTokensSupportingFeeOnTransferTokens(
+        IERC20Upgradeable(_path[0]).safeIncreaseAllowance(TRISOLARIS_ROUTER, _amount);
+        IUniswapV2Router02(TRISOLARIS_ROUTER).swapExactTokensForTokensSupportingFeeOnTransferTokens(
             _amount,
             0,
             _path,
@@ -133,20 +135,20 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
 
     /**
      * @dev Core harvest function.
-     *      Charges fees based on the amount of WFTM gained from reward
+     *      Charges fees based on the amount of WETH gained from reward
      */
     function _chargeFees() internal {
-        IERC20Upgradeable wftm = IERC20Upgradeable(WFTM);
-        uint256 wftmFee = (wftm.balanceOf(address(this)) * totalFee) / PERCENT_DIVISOR;
-        if (wftmFee != 0) {
-            uint256 callFeeToUser = (wftmFee * callFee) / PERCENT_DIVISOR;
-            uint256 treasuryFeeToVault = (wftmFee * treasuryFee) / PERCENT_DIVISOR;
+        IERC20Upgradeable weth = IERC20Upgradeable(WETH);
+        uint256 wethFee = (weth.balanceOf(address(this)) * totalFee) / PERCENT_DIVISOR;
+        if (wethFee != 0) {
+            uint256 callFeeToUser = (wethFee * callFee) / PERCENT_DIVISOR;
+            uint256 treasuryFeeToVault = (wethFee * treasuryFee) / PERCENT_DIVISOR;
             uint256 feeToStrategist = (treasuryFeeToVault * strategistFee) / PERCENT_DIVISOR;
             treasuryFeeToVault -= feeToStrategist;
 
-            wftm.safeTransfer(msg.sender, callFeeToUser);
-            wftm.safeTransfer(treasury, treasuryFeeToVault);
-            wftm.safeTransfer(strategistRemitter, feeToStrategist);
+            weth.safeTransfer(msg.sender, callFeeToUser);
+            weth.safeTransfer(treasury, treasuryFeeToVault);
+            weth.safeTransfer(strategistRemitter, feeToStrategist);
         }
     }
 
@@ -157,25 +159,25 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
         uint256 lp0Bal = IERC20Upgradeable(lpToken0).balanceOf(address(this));
         uint256 lp1Bal = IERC20Upgradeable(lpToken1).balanceOf(address(this));
 
-        if (lpToken0 == WFTM) {
-            address[] memory wftmToLP1 = new address[](2);
-            wftmToLP1[0] = WFTM;
-            wftmToLP1[1] = lpToken1;
-            _swap(lp0Bal / 2, wftmToLP1);
+        if (lpToken0 == WETH) {
+            address[] memory wethToLP1 = new address[](2);
+            wethToLP1[0] = WETH;
+            wethToLP1[1] = lpToken1;
+            _swap(lp0Bal / 2, wethToLP1);
         } else {
-            address[] memory wftmToLP0 = new address[](2);
-            wftmToLP0[0] = WFTM;
-            wftmToLP0[1] = lpToken0;
-            _swap(lp1Bal / 2, wftmToLP0);
+            address[] memory wethToLP0 = new address[](2);
+            wethToLP0[0] = WETH;
+            wethToLP0[1] = lpToken0;
+            _swap(lp1Bal / 2, wethToLP0);
         }
 
         lp0Bal = IERC20Upgradeable(lpToken0).balanceOf(address(this));
         lp1Bal = IERC20Upgradeable(lpToken1).balanceOf(address(this));
 
         if (lp0Bal != 0 && lp1Bal != 0) {
-            IERC20Upgradeable(lpToken0).safeIncreaseAllowance(SPOOKY_ROUTER, lp0Bal);
-            IERC20Upgradeable(lpToken1).safeIncreaseAllowance(SPOOKY_ROUTER, lp1Bal);
-            IUniswapV2Router02(SPOOKY_ROUTER).addLiquidity(
+            IERC20Upgradeable(lpToken0).safeIncreaseAllowance(TRISOLARIS_ROUTER, lp0Bal);
+            IERC20Upgradeable(lpToken1).safeIncreaseAllowance(TRISOLARIS_ROUTER, lp1Bal);
+            IUniswapV2Router02(TRISOLARIS_ROUTER).addLiquidity(
                 lpToken0,
                 lpToken1,
                 lp0Bal,
@@ -199,21 +201,21 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
 
     /**
      * @dev Returns the approx amount of profit from harvesting.
-     *      Profit is denominated in WFTM, and takes fees into account.
+     *      Profit is denominated in WETH, and takes fees into account.
      */
     function estimateHarvest() external view override returns (uint256 profit, uint256 callFeeToUser) {
-        uint256 pendingReward = IMasterChef(MASTER_CHEF).pendingBOO(poolId, address(this));
-        uint256 totalRewards = pendingReward + IERC20Upgradeable(BOO).balanceOf(address(this));
+        uint256 pendingReward = IMasterChef(MASTER_CHEF).pendingTri(poolId, address(this));
+        uint256 totalRewards = pendingReward + IERC20Upgradeable(TRI).balanceOf(address(this));
 
         if (totalRewards != 0) {
-            profit += IUniswapV2Router02(SPOOKY_ROUTER).getAmountsOut(totalRewards, booToWftmPath)[1];
+            profit += IUniswapV2Router02(TRISOLARIS_ROUTER).getAmountsOut(totalRewards, triToWethPath)[1];
         }
 
-        profit += IERC20Upgradeable(WFTM).balanceOf(address(this));
+        profit += IERC20Upgradeable(WETH).balanceOf(address(this));
 
-        uint256 wftmFee = (profit * totalFee) / PERCENT_DIVISOR;
-        callFeeToUser = (wftmFee * callFee) / PERCENT_DIVISOR;
-        profit -= wftmFee;
+        uint256 wethFee = (profit * totalFee) / PERCENT_DIVISOR;
+        callFeeToUser = (wethFee * callFee) / PERCENT_DIVISOR;
+        profit -= wethFee;
     }
 
     /**
@@ -226,7 +228,7 @@ contract ReaperStrategySpooky is ReaperBaseStrategyv1_1 {
     function _retireStrat() internal override {
         IMasterChef(MASTER_CHEF).deposit(poolId, 0); // deposit 0 to claim rewards
 
-        _swapToWFTM();
+        _swapToWETH();
 
         _addLiquidity();
 

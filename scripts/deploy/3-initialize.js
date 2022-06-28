@@ -1,6 +1,15 @@
+const strategyConfig = require('../../strategy.config');
+
 async function main() {
-  const vaultAddress = '0x91580E0Cb78deCeF5f1889AD58E2Cb5c16075243';
-  const strategyAddress = '0x80a2442da702e86B36644a377051dd01570a778d';
+  const vaultAddress = strategyConfig.vault.vaultAddress;
+  const strategyAddress = strategyConfig.strategy.strategyAddress;
+
+  if (!vaultAddress) {
+    throw new Error('No vault address set in "strategyConfig.vault.vaultAddress"');
+  }
+  if (!strategyAddress) {
+    throw new Error('No strategy address set in "strategyConfig.vault.strategyAddress"');
+  }
 
   const Vault = await ethers.getContractFactory('ReaperVaultv1_4');
   const vault = Vault.attach(vaultAddress);

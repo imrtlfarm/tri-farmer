@@ -11,15 +11,17 @@ import "@openzeppelin/contracts-upgradeable/utils/math/MathUpgradeable.sol";
 
 /**
  * @dev Deposit Trisolaris LP tokens into MasterChef. Harvest TRI rewards and recompound.
+ * @dev TRI-USDT: Pool address 0x61C9E05d1Cdb1b70856c7a2c53fA9c220830633c
+ * @dev TRI-USDT: MasterChefV2 PoolId: 4
  * @notice Contract data pulled from https://trisolaris-labs.github.io/docs/contracts/
  */
-contract ReaperStrategyTrisolaris is ReaperBaseStrategyv1_1 {
+contract ReaperStrategyTrisolarisUsdt is ReaperBaseStrategyv1_1 {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     // 3rd-party contract addresses
     address public constant TRISOLARIS_ROUTER = address(0x2CB45Edb4517d5947aFdE3BEAbF95A582506858B);
-    // Uses V1 masterchef at poolId 2
-    address public constant MASTER_CHEF = address(0x1f1Ed214bef5E83D8f5d0eB5D7011EB965D0D79B);
+    // Uses V2 masterchef at poolId 4
+    address public constant MASTER_CHEF = address(0x3838956710bcc9D122Dd23863a0549ca8D5675D6); // V2 Masterchef
 
     /**
      * @dev Tokens Used:

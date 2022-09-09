@@ -33,7 +33,7 @@ contract ReaperStrategyTrisolaris is ReaperBaseStrategyv1_1 {
      */
     address public constant USDC = address(0xB12BFcA5A55806AaF64E99521918A4bf0fC40802);
     address public constant wNEAR = address(0xC42C30aC6Cc15faC9bD938618BcaA1a1FaE8501d);
-    address public constant wETH = address(0xC9BdeEd33CD01541e1eeD10f90519d2C06Fe3feB);
+    //address public constant wETH = address(0xC9BdeEd33CD01541e1eeD10f90519d2C06Fe3feB);
     address public constant TRI = address(0xFa94348467f64D5A457F75F8bc40495D33c65aBB);
     address public want;
     address public lpToken0;
@@ -44,9 +44,9 @@ contract ReaperStrategyTrisolaris is ReaperBaseStrategyv1_1 {
      * {triToUsdcPath} - to swap {TRI} to {USDC} (using TRISOLARIS_ROUTER)
      * {triToWnearPath} - to swap {TRI} to {USDT} (using TRISOLARIS_ROUTER)
      */
-    address[] public triToUsdcPath;
+    address[] public wNEARToUsdcPath;
     address[] public triToWnearPath;
-    address[] public triToWethPath;
+    //address[] public triToWethPath;
 
     /**
      * @dev Trisolaris variables.
@@ -68,9 +68,9 @@ contract ReaperStrategyTrisolaris is ReaperBaseStrategyv1_1 {
         __ReaperBaseStrategy_init(_vault, _feeRemitters, _strategists);
         want = _want;
         poolId = _poolId;
-        triToUsdcPath = [TRI, USDC];
+        wNEARToUsdcPath = [wNEAR, USDC];
         triToWnearPath = [TRI, wNEAR];
-        triToWethPath = [TRI, wETH];
+        //triToWethPath = [TRI, wETH];
         lpToken0 = IUniV2Pair(want).token0();
         lpToken1 = IUniV2Pair(want).token1();
     }
@@ -111,12 +111,10 @@ contract ReaperStrategyTrisolaris is ReaperBaseStrategyv1_1 {
     function _harvestCore() internal override {
         // claim TRI from masterchef
         _claimRewards();
-        // charge fees on rewards, and convert them to USDC to distribture
-        _chargeFees();
-        // Swaps half remaining {TRI} to {wNEAR}
+        // Swaps all {TRI} to {wNEAR} 
         _swapToWnear();
-        // Swaps remaining {TRI} to {wETH}.
-        _swapToWeth();
+        // charge fees on wNEAR, and convert them to USDC to distribture and swap half of remaining to USDC
+        _chargeFeesAndSwapToUSDC();
         // create LP tokens
         _addLiquidity();
         // deposit LP back into strategy as compounded
@@ -126,13 +124,11 @@ contract ReaperStrategyTrisolaris is ReaperBaseStrategyv1_1 {
     function _swapToWnear() internal {
         IERC20Upgradeable tri = IERC20Upgradeable(TRI);
         uint256 triBalance = tri.balanceOf(address(this));
-        _swap(triBalance / 2, triToWnearPath);
+        _swap(triBalance, triToWnearPath);
     }
 
-    function _swapToWeth() internal {
-        IERC20Upgradeable tri = IERC20Upgradeable(TRI);
-        uint256 triBalance = tri.balanceOf(address(this));
-        _swap(triBalance, triToWethPath);
+    function _swapWnearToUSDC(uint256 amount) internal {
+        _swap(amount, wNEARToUsdcPath);
     }
 
     function _claimRewards() internal {
@@ -162,19 +158,20 @@ contract ReaperStrategyTrisolaris is ReaperBaseStrategyv1_1 {
 
     /**
      * @dev Core harvest function.
-     *      Charges fees based on the amount of TRI gained from reward
+     *      Charges fees based on the amount of wNEAR from TRI gained from reward
      */
-    function _chargeFees() internal {
-        IERC20Upgradeable tri = IERC20Upgradeable(TRI);
+    function _chargeFeesAndSwapToUSDC() internal {
+        IERC20Upgradeable wnear = IERC20Upgradeable(wNEAR);
         IERC20Upgradeable usdc = IERC20Upgradeable(USDC);
 
-        uint256 triBalance = tri.balanceOf(address(this));
-        uint256 triFee = (triBalance * totalFee) / PERCENT_DIVISOR;
+        uint256 wnearBalance = wnear.balanceOf(address(this));
+        uint256 wnearFee = (wnearBalance * totalFee) / PERCENT_DIVISOR;
 
-        if (triFee != 0) {
-            // swap tri fees to usdc
+        if (wnearFee != 0) {
+            // swap wnearFee + 50% of remaining to usdc usdc
             uint256 usdcBalanceBefore = usdc.balanceOf(address(this));
-            _swap(triFee, triToUsdcPath);
+            uint256 wnearBalanceAfterFee = wnearBalance - wnearFee;
+            _swapWnearToUSDC(wnearFee + (wnearBalanceAfterFee / 2));
             uint256 usdcBalanceAfter = usdc.balanceOf(address(this));
             uint256 usdcFee = usdcBalanceAfter - usdcBalanceBefore;
 
@@ -256,7 +253,9 @@ contract ReaperStrategyTrisolaris is ReaperBaseStrategyv1_1 {
 
         _swapToWnear();
 
-        _swapToWeth();
+        uint256 wNEARbal = IERC20Upgradeable(wNEAR).balanceOf(address(this));
+
+        _swapWnearToUSDC(wNEARbal / 2);
 
         _addLiquidity();
 
